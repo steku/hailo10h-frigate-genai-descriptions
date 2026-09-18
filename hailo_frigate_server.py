@@ -165,45 +165,45 @@ async def acquire_lock_or_abort(
     was_queued = lock.locked()
     if was_queued:
         queued_requests_count += 1
-        log_event(
-            "queue_monitor.log",
-            f"[Queue Monitor] Active request running on model. Request entered queue. Currently queued: {queued_requests_count}",
-            console_enabled=LOG_CONSOLE_QUEUE,
+        msg = (
+            "\n" + "=" * 64 + "\n"
+            f"[QUEUE MONITOR] MODEL IS BUSY | REQUEST QUEUED\n"
+            f"    Queue Position / Waiting: {queued_requests_count}\n"
+            + "=" * 64
         )
+        log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
+    else:
+        msg = (
+            "\n" + "-" * 64 + "\n"
+            "[QUEUE MONITOR] MODEL IS IDLE | PROCESSING IMMEDIATELY (0 QUEUED)\n"
+            + "-" * 64
+        )
+        log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
 
-    acquire_task = asyncio.create_task(lock.acquire())
-    disconnect_task = asyncio.create_task(http_request.is_disconnected())
     start_time = time.time()
-
     try:
-        done, _ = await asyncio.wait(
-            [acquire_task, disconnect_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        if acquire_task in done:
-            disconnect_task.cancel()
-            return True
-
-        # Client disconnected / cancelled while waiting in queue
+        await lock.acquire()
+        return True
+    except asyncio.CancelledError:
         elapsed = time.time() - start_time
-        msg = f"[Queue Monitor] Frigate client cancelled/disconnected while waiting in queue ({elapsed:.1f}s). Dropping request."
+        msg = (
+            "\n" + "!" * 64 + "\n"
+            f"[QUEUE MONITOR] CLIENT CANCELLED/DISCONNECTED IN QUEUE ({elapsed:.1f}s)\n"
+            + "!" * 64
+        )
         log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
         log_timed_out_request(chat_request, "Client cancelled while waiting in queue", elapsed, prompt_to_model)
-        await _cancel_and_release(acquire_task, lock)
-        return False
-    except Exception:
-        disconnect_task.cancel()
-        await _cancel_and_release(acquire_task, lock)
         raise
     finally:
         if was_queued:
             queued_requests_count = max(0, queued_requests_count - 1)
-            log_event(
-                "queue_monitor.log",
-                f"[Queue Monitor] Request left queue. Currently queued: {queued_requests_count}",
-                console_enabled=LOG_CONSOLE_QUEUE,
+            msg = (
+                "\n" + "=" * 64 + "\n"
+                f"[QUEUE MONITOR] LOCK ACQUIRED | RUNNING ON MODEL\n"
+                f"    Remaining in Queue: {queued_requests_count}\n"
+                + "=" * 64
             )
+            log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
 
 
 # ---------------------------------------------------------------------------
@@ -1322,6 +1322,15 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     if not vlm_instance:
         raise HTTPException(status_code=503, detail="NPU hardware uninitialized.")
 
+    queue_start_time = time.time()
+    if not await acquire_lock_or_abort(
+        npu_lock,
+        http_request,
+        chat_request=request,
+    ):
+        raise HTTPException(status_code=499, detail="Client Closed Request")
+    queue_time = time.time() - queue_start_time
+
     t_prep_start = time.time()
     message_content_text = extract_message_content_text(request.messages)
     collected_images = extract_message_images(request.messages, max_images=1)
@@ -1405,16 +1414,6 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     ]
 
     prompt_to_model = build_model_prompt_log(message_content_text, cleaned_prompt)
-
-    queue_start_time = time.time()
-    if not await acquire_lock_or_abort(
-        npu_lock,
-        http_request,
-        chat_request=request,
-        prompt_to_model=prompt_to_model,
-    ):
-        raise HTTPException(status_code=499, detail="Client Closed Request")
-    queue_time = time.time() - queue_start_time
 
     loop = asyncio.get_running_loop()
     try:
