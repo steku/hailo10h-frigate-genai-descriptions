@@ -26,8 +26,8 @@ except ImportError:
 try:
     from hailo_platform import VDevice
     from hailo_platform.genai import VLM
-except ImportError:
-    print("CRITICAL ENVIRONMENT ROADBLOCK: HailoRT Platform SDK missing from active environment.")
+except ImportError as err:
+    print(f"CRITICAL ENVIRONMENT ROADBLOCK: HailoRT Platform SDK missing from active environment: {err}")
     sys.exit(1)
 
 # ---------------------------------------------------------------------------

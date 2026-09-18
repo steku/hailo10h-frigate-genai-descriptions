@@ -7,10 +7,11 @@ ENV PYTHONUNBUFFERED=1 \
     HEF_MODEL_PATH=/usr/local/hailo/resources/models/hailo10h/Qwen2-VL-2B-Instruct.hef \
     MODEL_ID=Qwen2-VL-2B-Instruct.hef
 
-# Install only minimal runtime libraries required by HailoRT, Pillow, and healthcheck
+# Install minimal runtime libraries required by HailoRT (including OpenMP libgomp1), Pillow, and healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
+    libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,8 +21,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Automatically install any local HailoRT .deb or .whl files placed in ./wheels if provided
-COPY ./wheels* /tmp/wheels/
+# Copy and install HailoRT wheel/deb packages from the wheel directory
+COPY wheel* /tmp/wheels/
 RUN if [ -d "/tmp/wheels" ]; then \
         if ls /tmp/wheels/*.deb 1> /dev/null 2>&1; then \
             dpkg -i /tmp/wheels/*.deb || apt-get install -f -y; \

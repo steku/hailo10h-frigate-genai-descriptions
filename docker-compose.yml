@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   hailo-frigate-server:
     container_name: hailo-frigate-server
