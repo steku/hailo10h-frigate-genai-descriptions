@@ -39,7 +39,6 @@ HEF_MODEL_PATH = os.environ.get(
 )
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen2-VL-2B-Instruct.hef")
 TARGET_NPU_DIM = 336
-MAX_QUEUE_WAIT_SECONDS = 50.0
 
 # ---------------------------------------------------------------------------
 # Logging Configuration
@@ -156,43 +155,33 @@ def log_timed_out_request(
 async def acquire_lock_or_abort(
     lock: asyncio.Lock,
     http_request: Request,
-    max_wait: float = MAX_QUEUE_WAIT_SECONDS,
     chat_request: Optional[Any] = None,
     prompt_to_model: Optional[str] = None,
 ) -> bool:
-    """Waits for the NPU lock while actively checking if the client disconnected or timed out."""
+    """Waits for the NPU lock, aborting only if the Frigate client cancels/disconnects."""
     acquire_task = asyncio.create_task(lock.acquire())
+    disconnect_task = asyncio.create_task(http_request.is_disconnected())
     start_time = time.time()
 
     try:
-        while not acquire_task.done():
-            elapsed = time.time() - start_time
-            if await http_request.is_disconnected():
-                msg = f"[Queue Monitor] Frigate client disconnected while waiting in queue ({elapsed:.1f}s). Dropping request."
-                log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
-                await _cancel_and_release(acquire_task, lock)
-                log_timed_out_request(chat_request, "Client disconnected while waiting in queue", elapsed, prompt_to_model)
-                return False
+        done, _ = await asyncio.wait(
+            [acquire_task, disconnect_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
-            if elapsed > max_wait:
-                msg = f"[Queue Monitor] Queue wait exceeded {max_wait:.0f}s threshold ({elapsed:.1f}s). Dropping request before model execution."
-                log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
-                await _cancel_and_release(acquire_task, lock)
-                log_timed_out_request(chat_request, f"Queue wait exceeded {max_wait:.0f}s timeout", elapsed, prompt_to_model)
-                return False
+        if acquire_task in done:
+            disconnect_task.cancel()
+            return True
 
-            await asyncio.sleep(0.25)
-
+        # Client disconnected / cancelled while waiting in queue
         elapsed = time.time() - start_time
-        if await http_request.is_disconnected():
-            msg = f"[Queue Monitor] Frigate client disconnected right after lock acquisition ({elapsed:.1f}s). Releasing lock."
-            log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
-            lock.release()
-            log_timed_out_request(chat_request, "Client disconnected right after lock acquisition", elapsed, prompt_to_model)
-            return False
-
-        return True
+        msg = f"[Queue Monitor] Frigate client cancelled/disconnected while waiting in queue ({elapsed:.1f}s). Dropping request."
+        log_event("queue_monitor.log", msg, console_enabled=LOG_CONSOLE_QUEUE)
+        log_timed_out_request(chat_request, "Client cancelled while waiting in queue", elapsed, prompt_to_model)
+        await _cancel_and_release(acquire_task, lock)
+        return False
     except Exception:
+        disconnect_task.cancel()
         await _cancel_and_release(acquire_task, lock)
         raise
 
@@ -1362,11 +1351,10 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     if not await acquire_lock_or_abort(
         npu_lock,
         http_request,
-        max_wait=MAX_QUEUE_WAIT_SECONDS,
         chat_request=request,
         prompt_to_model=prompt_to_model,
     ):
-        raise HTTPException(status_code=499, detail="Client Closed Request or Queue Timeout")
+        raise HTTPException(status_code=499, detail="Client Closed Request")
     queue_time = time.time() - queue_start_time
 
     loop = asyncio.get_running_loop()
