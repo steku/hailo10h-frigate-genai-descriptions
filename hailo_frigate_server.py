@@ -106,6 +106,7 @@ DEFAULT_REVIEW_PROPERTIES = {
 vdevice = None
 vlm_instance = None
 npu_lock = asyncio.Lock()
+queued_requests_count = 0
 
 TIMEOUT_LOG_FILE = os.environ.get(
     "FRIGATE_TIMEOUT_LOG",
@@ -159,6 +160,17 @@ async def acquire_lock_or_abort(
     prompt_to_model: Optional[str] = None,
 ) -> bool:
     """Waits for the NPU lock, aborting only if the Frigate client cancels/disconnects."""
+    global queued_requests_count
+
+    was_queued = lock.locked()
+    if was_queued:
+        queued_requests_count += 1
+        log_event(
+            "queue_monitor.log",
+            f"[Queue Monitor] Active request running on model. Request entered queue. Currently queued: {queued_requests_count}",
+            console_enabled=LOG_CONSOLE_QUEUE,
+        )
+
     acquire_task = asyncio.create_task(lock.acquire())
     disconnect_task = asyncio.create_task(http_request.is_disconnected())
     start_time = time.time()
@@ -184,6 +196,14 @@ async def acquire_lock_or_abort(
         disconnect_task.cancel()
         await _cancel_and_release(acquire_task, lock)
         raise
+    finally:
+        if was_queued:
+            queued_requests_count = max(0, queued_requests_count - 1)
+            log_event(
+                "queue_monitor.log",
+                f"[Queue Monitor] Request left queue. Currently queued: {queued_requests_count}",
+                console_enabled=LOG_CONSOLE_QUEUE,
+            )
 
 
 # ---------------------------------------------------------------------------
