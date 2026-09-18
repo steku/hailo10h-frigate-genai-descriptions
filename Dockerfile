@@ -20,15 +20,15 @@ WORKDIR /app
 
 # Install Python dependencies directly using pre-installed pip
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
-# Copy and install HailoRT wheel, deb, and shared libraries from the wheel directory
+# Copy and install HailoRT wheel from wheels directory
 COPY wheels/* /tmp/wheels/
-RUN pip install --no-cache-dir /tmp/wheels/*.whl; \
-    rm -rf /tmp/wheels; \
+RUN pip install --no-cache-dir --root-user-action=ignore /tmp/wheels/*.whl && \
+    rm -rf /tmp/wheels
 
-    # Copy application source code
-    COPY hailo_frigate_server.py .
+# Copy application source code
+COPY hailo_frigate_server.py .
 
 # Create logs directory
 RUN mkdir -p /app/logs
