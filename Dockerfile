@@ -23,7 +23,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install HailoRT wheel, deb, and shared libraries from the wheel directory
-COPY wheel/* /tmp/wheels/
+COPY wheels/* /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl; \
     rm -rf /tmp/wheels; \
 
