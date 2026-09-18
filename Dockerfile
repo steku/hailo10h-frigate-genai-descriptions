@@ -23,24 +23,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install HailoRT wheel, deb, and shared libraries from the wheel directory
-COPY wheel* /tmp/wheels/
-RUN if [ -d "/tmp/wheels" ]; then \
-        if ls /tmp/wheels/*.deb 1> /dev/null 2>&1; then \
-            dpkg -i /tmp/wheels/*.deb || apt-get install -f -y; \
-        fi && \
-        if ls /tmp/wheels/*.whl 1> /dev/null 2>&1; then \
-            pip install --no-cache-dir /tmp/wheels/*.whl; \
-        fi && \
-        if ls /tmp/wheels/*.so* 1> /dev/null 2>&1; then \
-            cp -P /tmp/wheels/*.so* /usr/lib/; \
-        fi && \
-        find /usr/local/lib/python3.10 -name "libhailort.so*" -exec cp -P {} /usr/lib/ \; 2>/dev/null || true; \
-        ldconfig; \
-        rm -rf /tmp/wheels; \
-    fi
+COPY wheel/* /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl; \
+    rm -rf /tmp/wheels; \
 
-# Copy application source code
-COPY hailo_frigate_server.py .
+    # Copy application source code
+    COPY hailo_frigate_server.py .
 
 # Create logs directory
 RUN mkdir -p /app/logs
