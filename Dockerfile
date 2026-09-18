@@ -8,11 +8,12 @@ ENV PYTHONUNBUFFERED=1 \
     MODEL_ID=Qwen2-VL-2B-Instruct.hef \
     LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu:/usr/local/lib:${LD_LIBRARY_PATH}
 
-# Install minimal runtime libraries required by HailoRT (including OpenMP libgomp1), Pillow, and healthcheck
+# Install minimal runtime libraries required by HailoRT (including OpenMP libgomp1 and libusb), Pillow, and healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
     libgomp1 \
+    libusb-1.0-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
