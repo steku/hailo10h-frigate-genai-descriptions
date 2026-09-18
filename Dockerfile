@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # Copy and install HailoRT deb and wheel from wheels directory
 COPY wheels/ /tmp/wheels/
-RUN dpkg -i /tmp/wheels/*.deb && \
+RUN dpkg -x /tmp/wheels/*.deb / && \
+    ldconfig && \
     pip install --no-cache-dir --root-user-action=ignore /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels
 
