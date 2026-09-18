@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  hailo-frigate-server:
+    container_name: hailo-frigate-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hailo-frigate-server:latest
+    restart: unless-stopped
+    devices:
+      # Pass the Hailo-10H NPU hardware device to the container
+      - /dev/h1x-0:/dev/h1x-0
+    volumes:
+      # Mount the compiled HEF model from the host
+      - /usr/local/hailo/resources/models/hailo10h:/usr/local/hailo/resources/models/hailo10h:ro
+      # Persist application logs to the host
+      - ./logs:/app/logs
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HEF_MODEL_PATH=/usr/local/hailo/resources/models/hailo10h/Qwen2-VL-2B-Instruct.hef
+      - MODEL_ID=Qwen2-VL-2B-Instruct.hef
+      - FRIGATE_LOG_DIR=/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
