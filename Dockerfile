@@ -22,9 +22,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
-# Copy and install HailoRT wheel from wheels directory
-COPY wheels/* /tmp/wheels/
-RUN pip install --no-cache-dir --root-user-action=ignore /tmp/wheels/*.whl && \
+# Copy and install HailoRT deb and wheel from wheels directory
+COPY wheels/ /tmp/wheels/
+RUN dpkg -i /tmp/wheels/*.deb && \
+    pip install --no-cache-dir --root-user-action=ignore /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels
 
 # Copy application source code
