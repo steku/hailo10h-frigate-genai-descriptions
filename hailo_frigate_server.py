@@ -373,18 +373,42 @@ def extract_message_images(messages: List[Any], max_images: int = 1) -> List[Ima
     return collected_images
 
 
-def extract_section_with_header(text: str, header_name: str) -> str:
+def extract_section_with_header(text: str, header_candidates: Union[str, List[str]]) -> str:
     if not text:
         return ""
-    pattern = rf"(?ims)(^\s*#+\s*{re.escape(header_name)}[^\n\r]*[\r\n]+.*?)(?=^\s*#+|\Z)"
-    match = re.search(pattern, text)
-    if match:
-        return match.group(1).strip()
+    if isinstance(header_candidates, str):
+        header_candidates = [header_candidates]
 
-    alt_pattern = rf"(?ims)(^\s*{re.escape(header_name)}\s*:?[\r\n]+.*?)(?=^\s*(?:#+|[A-Z][a-zA-Z0-9 _]+:)|\Z)"
-    alt_match = re.search(alt_pattern, text)
-    if alt_match:
-        return alt_match.group(1).strip()
+    for candidate in header_candidates:
+        pattern = (
+            rf"(?im)^[ \t]*(?:#+\s*|\*{1,2}|_{1,2}|-\s*)*"
+            + re.escape(candidate)
+            + r"[ \t]*(?:\*{1,2}|_{1,2})*[ \t]*:?[ \t]*\r?\n"
+        )
+        match = re.search(pattern, text)
+        if not match:
+            continue
+
+        start_idx = match.start()
+        after_header_idx = match.end()
+
+        boundary_pattern = (
+            r"(?im)(?:\r?\n[ \t]*\r?\n|\A)[ \t]*(?:"
+            r"#+\s+[A-Za-z]"
+            r"|\*{1,2}[A-Za-z][A-Za-z0-9 _-]{2,40}\*{1,2}:?"
+            r"|(?:Sequence|Objects in Scene|Objects|Tracked Objects|Instructions|Your Task|Task|Response Format|Guidelines)\s*:?"
+            r")"
+        )
+
+        next_match = re.search(boundary_pattern, text[after_header_idx:])
+        if next_match:
+            end_idx = after_header_idx + next_match.start()
+            section = text[start_idx:end_idx].strip()
+        else:
+            section = text[start_idx:].strip()
+
+        if section:
+            return section
 
     return ""
 
@@ -395,6 +419,21 @@ def condense_prompt(text: str, max_chars: int = 1000) -> str:
     clean = text.strip()
     if len(clean) <= max_chars:
         return clean
+
+    seq = extract_section_with_header(clean, ["Sequence Details", "Sequence"])
+    objs = extract_section_with_header(clean, ["Objects in Scene", "Tracked Objects", "Objects"])
+
+    parts = []
+    if seq:
+        parts.append(seq)
+    if objs:
+        parts.append(objs)
+
+    if parts:
+        combined = "\n\n".join(parts)
+        if len(combined) <= max_chars:
+            return combined
+        return combined[:max_chars]
 
     paragraphs = [p.strip() for p in clean.split("\n\n") if p.strip()]
     condensed_parts = [paragraphs[0][:500]] if paragraphs else []
@@ -416,23 +455,23 @@ def condense_prompt(text: str, max_chars: int = 1000) -> str:
 def build_model_prompt_log(message_content_text: str, cleaned_prompt: str = "") -> str:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     lines = [f"--- LOGGING PROMPT TO MODEL [{timestamp}] ---"]
-    seq_section = (
-        extract_section_with_header(message_content_text, "Sequence Details")
-        or extract_section_with_header(message_content_text, "Sequence")
+    seq_section = extract_section_with_header(
+        message_content_text,
+        ["Sequence Details", "Sequence", "Event Details", "Video Sequence", "Timeline"],
     )
     if seq_section:
         lines.append(f"{seq_section}\n")
 
-    objects_section = (
-        extract_section_with_header(message_content_text, "Objects in Scene")
-        or extract_section_with_header(message_content_text, "Objects")
-        or extract_section_with_header(message_content_text, "Tracked Objects")
+    objects_section = extract_section_with_header(
+        message_content_text,
+        ["Objects in Scene", "Objects in the Scene", "Tracked Objects", "Objects", "Detected Objects"],
     )
     if objects_section:
         lines.append(f"{objects_section}\n")
 
-    if not seq_section and not objects_section and cleaned_prompt:
-        lines.append(f"prompt: {cleaned_prompt}\n")
+    if not seq_section and not objects_section:
+        prompt_body = cleaned_prompt or message_content_text
+        lines.append(f"Prompt Content:\n{prompt_body.strip()}\n")
 
     lines.append("-------------------------------")
     return "\n".join(lines)
